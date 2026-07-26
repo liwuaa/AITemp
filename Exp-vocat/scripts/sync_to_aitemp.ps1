@@ -9,19 +9,24 @@ $RepoUrl = "https://github.com/liwuaa/AITemp.git"
 $RemotePrefix = "Exp-vocat"
 $Src = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Work = Join-Path $env:TEMP "AITemp-sync"
+$GitNet = @(
+    "-c", "http.proxy=http://127.0.0.1:10809",
+    "-c", "https.proxy=http://127.0.0.1:10809",
+    "-c", "http.version=HTTP/1.1"
+)
 
 Write-Host "Source : $Src"
 Write-Host "Target : $RepoUrl/$RemotePrefix (local wins)"
 
 if (Test-Path (Join-Path $Work ".git")) {
     Push-Location $Work
-    git fetch origin
+    git @GitNet fetch origin
     git checkout main
     git reset --hard origin/main
     Pop-Location
 } else {
     if (Test-Path $Work) { Remove-Item $Work -Recurse -Force }
-    git clone $RepoUrl $Work
+    git @GitNet clone $RepoUrl $Work
 }
 
 $Dst = Join-Path $Work $RemotePrefix
@@ -50,7 +55,13 @@ try {
 
     $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     git commit --no-verify -m "Sync Exp-vocat from local ($stamp)"
-    git push origin main
+    if ($LASTEXITCODE -ne 0) { throw "git commit failed ($LASTEXITCODE)" }
+
+    git @GitNet push origin main
+    if ($LASTEXITCODE -ne 0) {
+        git push origin main
+        if ($LASTEXITCODE -ne 0) { throw "git push failed ($LASTEXITCODE)" }
+    }
     Write-Host "Pushed to $RepoUrl ($RemotePrefix)."
 } finally {
     Pop-Location

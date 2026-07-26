@@ -55,5 +55,9 @@ fi
 
 stamp="$(date '+%Y-%m-%d %H:%M:%S')"
 git commit --no-verify -m "Sync Exp-vocat from local ($stamp)"
-git push origin main
+
+# This environment often needs local proxy + HTTP/1.1 for GitHub.
+if ! git -c http.proxy=http://127.0.0.1:10809 -c https.proxy=http://127.0.0.1:10809 -c http.version=HTTP/1.1 push origin main; then
+  git push origin main
+fi
 echo "Pushed to $REPO_URL ($REMOTE_PREFIX)."
