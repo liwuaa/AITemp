@@ -3,18 +3,22 @@
 #include "vocat_base_control.h"
 #include "display/display.h"
 #include "display/emote_display.h"
+#include "board.h"
 #include "config.h"
 #include "application.h"
 #include "assets/lang_config.h"
 #include "device_state.h"
+#include "ui_bridge.h"
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <cstring>
 #include "customer_ui/alarm_manager.h"
 #include "customer_ui/alarm_api.h"
+#include "customer_ui/alarm_muyu.h"
+#include "customer_ui/alarm_pomodoro.h"
+#include <lvgl.h>
 
 #define TAG "BaseControl"
-
-const char *current_page = nullptr;
 
 static void lvgl_muyu_click_cb(void *arg)
 {
@@ -22,11 +26,28 @@ static void lvgl_muyu_click_cb(void *arg)
     lvgl_muyu_click();
 }
 
+static void lvgl_fish_eat_cb(void *arg)
+{
+    (void)arg;
+    // Prefer home emote layer so "eat" is visible.
+    main_ui_switch_page(UI_BRIDGE_PAGE_HOME);
+    Display *display = Board::GetInstance().GetDisplay();
+    emote::EmoteDisplay *emote_display = display != nullptr
+        ? dynamic_cast<emote::EmoteDisplay *>(display) : nullptr;
+    if (emote_display != nullptr) {
+        emote_display->InsertAnimDialog("eat", 3500);
+        ESP_LOGI(TAG, "Fish eat animation started");
+    } else {
+        ESP_LOGW(TAG, "Fish attached but EmoteDisplay unavailable");
+    }
+}
+
 BaseControl::BaseControl(EspS3Cat* board) : board_(board)
 {
     vocat_base_online_ = false;
     last_heartbeat_time_ = 0;
     offline_since_ms_ = 0;
+    last_slide_toggle_ms_ = 0;
     heartbeat_check_timer_ = nullptr;
     calibrate_semaphore_ = xSemaphoreCreateBinary();
 
@@ -94,6 +115,35 @@ void BaseControl::Initialize()
     offline_since_ms_ = 0;
 }
 
+void BaseControl::HandleMagSlideChatToggle()
+{
+    // ToggleChatState() uses AutoStop listening → silence ends chat immediately.
+    // Magnet bounce also double-fires → start then stop. Use ManualStop + debounce.
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (last_slide_toggle_ms_ > 0 && (now_ms - last_slide_toggle_ms_) < SLIDE_DEBOUNCE_MS) {
+        ESP_LOGW(TAG, "Mag slide debounced (%ld ms)", (long)(now_ms - last_slide_toggle_ms_));
+        return;
+    }
+    last_slide_toggle_ms_ = now_ms;
+
+    auto &app = Application::GetInstance();
+    DeviceState state = app.GetDeviceState();
+    if (state == kDeviceStateIdle) {
+        ESP_LOGI(TAG, "Mag slide: StartListening (manual stop)");
+        app.StartListening();
+    } else if (state == kDeviceStateListening) {
+        ESP_LOGI(TAG, "Mag slide: StopListening");
+        app.StopListening();
+    } else if (state == kDeviceStateSpeaking) {
+        ESP_LOGI(TAG, "Mag slide: AbortSpeaking");
+        app.ToggleChatState();
+    } else if (state == kDeviceStateConnecting) {
+        ESP_LOGW(TAG, "Mag slide ignored while connecting");
+    } else {
+        ESP_LOGW(TAG, "Mag slide ignored in state %d", (int)state);
+    }
+}
+
 void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
 {
     Display* display = board_->GetDisplay();
@@ -115,28 +165,38 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
     case VOCAT_BASE_CMD_RECV_SLIDE_SWITCH: {
         if (data_len >= 2) {
             auto &app = Application::GetInstance();
-
+            const char *page = ui_bridge_get_current_page();
             uint16_t event = (data[0] << 8) | data[1];
             switch (event) {
             case VOCAT_BASE_CMD_RECV_SWITCH_SLIDE_DOWN:
-                ESP_LOGI(TAG, "Slide switch down");
-                app.ToggleChatState();
+                ESP_LOGI(TAG, "Slide switch down (page=%s)", page ? page : "null");
+                if (page != nullptr && strcmp(page, PAGE_POMODORO) == 0) {
+                    // Keep pomodoro focused; still allow ending chat if somehow listening.
+                    if (app.GetDeviceState() == kDeviceStateListening ||
+                        app.GetDeviceState() == kDeviceStateSpeaking) {
+                        HandleMagSlideChatToggle();
+                    }
+                } else {
+                    HandleMagSlideChatToggle();
+                }
                 break;
             case VOCAT_BASE_CMD_RECV_SWITCH_SLIDE_UP:
-                ESP_LOGI(TAG, "Slide switch up");
-                current_page = ui_bridge_get_current_page();
-                if(strcmp(current_page, PAGE_POMODORO) == 0) {
+                ESP_LOGI(TAG, "Slide switch up (page=%s)", page ? page : "null");
+                if (page != nullptr && strcmp(page, PAGE_POMODORO) == 0) {
                     alarm_start_pomodoro(5);
                     ESP_LOGI(TAG, "Restart POMODORO");
-                }else{
-                app.ToggleChatState();}
+                } else {
+                    HandleMagSlideChatToggle();
+                }
                 break;
             case VOCAT_BASE_CMD_RECV_SWITCH_SINGLE_CLICK:
-                ESP_LOGI(TAG, "Single click");
-                current_page = ui_bridge_get_current_page();
-                if (strcmp(current_page, PAGE_MUYU) == 0) {
+                ESP_LOGI(TAG, "Single click (page=%s)", page ? page : "null");
+                // Hardware: click is recognized only when magnet is at DOWN position.
+                if (page != nullptr && strcmp(page, PAGE_MUYU) == 0) {
                     lv_async_call(lvgl_muyu_click_cb, nullptr);
-                    ESP_LOGI(TAG, "Set MAIN_EVENT_PLAY_MUYU");
+                    ESP_LOGI(TAG, "Muyu click dispatched");
+                } else {
+                    ESP_LOGW(TAG, "Muyu click ignored: swipe to MUYU page first, magnet at bottom, then click");
                 }
                 break;
             case VOCAT_BASE_CMD_RECV_CALIBRATE_START:
@@ -156,9 +216,8 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
                 break;
             case VOCAT_BASE_CMD_RECV_SWITCH_FISH_ATTACHED:
                 ESP_LOGI(TAG, "Fish attached");
-                if (emote_display != nullptr) {
-                    emote_display->InsertAnimDialog("eat", 3500);
-                }
+                // Needs fish accessory placed from UP slot; run on LVGL thread.
+                lv_async_call(lvgl_fish_eat_cb, nullptr);
                 break;
             case VOCAT_BASE_CMD_RECV_SWITCH_PAIR_DETECT:
                 ESP_LOGI(TAG, "Pair detect");
@@ -168,7 +227,7 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
                 vocat_base_control_set_action(VOCAT_BASE_CMD_SET_ACTION_LOOK_AROUND);
                 break;
             default:
-                ESP_LOGI(TAG, "Slide switch event: %d", event);
+                ESP_LOGI(TAG, "Slide switch event: %d (unhandled action)", event);
                 break;
             }
         }
