@@ -187,9 +187,14 @@ void EmoteDisplay::SetChatMessage(const char* const role, const char* const cont
             std::replace(new_content, new_content + len, static_cast<char>(0x0A), static_cast<char>(0x20));
             emote_set_event_msg(emote_handle_, EMOTE_MGR_EVT_SYS, new_content);
             delete[] new_content;
-        } else {
+        } else if (std::strcmp(role, "assistant") == 0) {
+            // Only assistant TTS should drive SPEAK UI. User STT must not flip
+            // listening face into speak mode (UI/state mismatch).
             emote_set_event_msg(emote_handle_, EMOTE_MGR_EVT_SPEAK, content);
+        } else if (std::strcmp(role, "system") == 0) {
+            emote_set_event_msg(emote_handle_, EMOTE_MGR_EVT_SYS, content);
         }
+        // role "user": keep current listen/idle/speak visual state
     }
 }
 

@@ -1,0 +1,24 @@
+{
+  "name": "qq-music-xiaozhi",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QQ Music API + Xiaozhi MCP bridge for local deployment",
+  "scripts": {
+    "api": "qq-music-api",
+    "mcp": "node ./mcp/qq_music_local_mcp.mjs",
+    "mcp:official": "qq-music-api-mcp",
+    "proxy": "node ./mcp/proxy-play.mjs",
+    "start:api": "node ./node_modules/@sansenjian/qq-music-api/dist/app.js",
+    "start:mcp": "node ./mcp/qq_music_local_mcp.mjs",
+    "start:proxy": "node ./mcp/proxy-play.mjs"
+  },
+  "engines": {
+    "node": "^20.17.0 || >=22.9.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sansenjian/qq-music-api": "^2.4.0",
+    "@sansenjian/qq-music-api-mcp": "^2.4.0",
+    "zod": "^4.4.3"
+  }
+}

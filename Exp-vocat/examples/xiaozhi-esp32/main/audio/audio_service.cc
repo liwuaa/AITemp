@@ -286,6 +286,8 @@ void AudioService::AudioOutputTask() {
             esp_timer_stop(audio_power_timer_);
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
             codec_->EnableOutput(true);
+            /* Prevent power timer from immediately closing output before first write. */
+            last_output_time_ = std::chrono::steady_clock::now();
         }
         codec_->OutputData(task->pcm);
 
@@ -553,6 +555,7 @@ void AudioService::PlaySound(const std::string_view& ogg) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
         codec_->EnableOutput(true);
+        last_output_time_ = std::chrono::steady_clock::now();
     }
 
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(ogg.data());
@@ -666,7 +669,9 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     auto now = std::chrono::steady_clock::now();
     auto input_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_input_time_).count();
     auto output_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_output_time_).count();
-    if (input_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->input_enabled()) {
+    // Duplex I2S: closing input while output is active can disable the TX path
+    // ("Pending out channel" / silent speaker while TTS logs still appear).
+    if (input_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->input_enabled() && !codec_->output_enabled()) {
         codec_->EnableInput(false);
     }
     if (output_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->output_enabled()) {

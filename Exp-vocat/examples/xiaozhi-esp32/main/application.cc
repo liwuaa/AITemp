@@ -586,6 +586,10 @@ void Application::MainEventLoop() {
 
         if (bits & MAIN_EVENT_VAD_CHANGE) {
             if (device_state_ == kDeviceStateListening) {
+                // Voice activity: reset idle timeout so long utterances aren't cut.
+                if (audio_service_.IsVoiceDetected()) {
+                    clock_ticks_ = 0;
+                }
                 auto led = Board::GetInstance().GetLed();
                 led->OnStateChanged();
             }
@@ -604,7 +608,19 @@ void Application::MainEventLoop() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-        
+
+            // AutoStop: server may end listen on silence without telling the client.
+            // Staying in Listening keeps wake-word off → UI shows listen but can't wake.
+            // ManualStop (mag slide): longer grace, then return Idle so voice wake works again.
+            if (device_state_ == kDeviceStateListening && protocol_) {
+                const int timeout_s = (listening_mode_ == kListeningModeManualStop) ? 60 : 15;
+                if (clock_ticks_ >= timeout_s) {
+                    ESP_LOGI(TAG, "Listening idle timeout (%ds), return to standby for wake word", timeout_s);
+                    protocol_->SendStopListening();
+                    SetDeviceState(kDeviceStateIdle);
+                }
+            }
+
             // Print the debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 // SystemInfo::PrintTaskCpuUsage(pdMS_TO_TICKS(1000));
@@ -706,6 +722,9 @@ void Application::SetDeviceState(DeviceState state) {
                 protocol_->SendStartListening(listening_mode_);
                 audio_service_.EnableVoiceProcessing(true);
                 audio_service_.EnableWakeWordDetection(false);
+            } else {
+                // Already running (e.g. realtime): still ensure wake word stays off
+                audio_service_.EnableWakeWordDetection(false);
             }
             break;
         case kDeviceStateSpeaking:
@@ -713,7 +732,9 @@ void Application::SetDeviceState(DeviceState state) {
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
-                // Only AFE wake word can be detected in speaking mode
+                // Keep mic path alive during TTS when possible. Disabling both
+                // wake-word and voice-processing lets power mgmt close input and
+                // can silence the speaker on duplex I2S (BoxAudioCodec).
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();

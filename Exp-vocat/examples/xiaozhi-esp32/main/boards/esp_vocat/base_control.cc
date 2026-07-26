@@ -169,6 +169,8 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
             uint16_t event = (data[0] << 8) | data[1];
             switch (event) {
             case VOCAT_BASE_CMD_RECV_SWITCH_SLIDE_DOWN:
+                // One physical slide often emits UP+DOWN; only DOWN toggles chat
+                // to avoid start-then-stop (UI shows listen, wake word already off).
                 ESP_LOGI(TAG, "Slide switch down (page=%s)", page ? page : "null");
                 if (page != nullptr && strcmp(page, PAGE_POMODORO) == 0) {
                     // Keep pomodoro focused; still allow ending chat if somehow listening.
@@ -186,7 +188,7 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
                     alarm_start_pomodoro(5);
                     ESP_LOGI(TAG, "Restart POMODORO");
                 } else {
-                    HandleMagSlideChatToggle();
+                    ESP_LOGD(TAG, "Slide up ignored for chat (use slide down to toggle)");
                 }
                 break;
             case VOCAT_BASE_CMD_RECV_SWITCH_SINGLE_CLICK:
