@@ -319,7 +319,7 @@ void EspS3Cat::DetectPcbAudioPins()
     }
 
     if (detected_pcb_version_ != SELECT_BOARD) {
-        ESP_LOGW(TAG, "Detected PCB V1.%d but SELECT_BOARD is V1.%d — audio pins follow detection",
+        ESP_LOGW(TAG, "Detected PCB V1.%d but SELECT_BOARD is V1.%d — audio/UART pins follow detection",
                  detected_pcb_version_ == PCB_VERSION_V1_0 ? 0 : 2,
                  SELECT_BOARD == PCB_VERSION_V1_0 ? 0 : 2);
     }

@@ -41,9 +41,20 @@ Detect PCB V1.2 audio pins: DIN=3 PA=15 (codec power GPIO48 on)
 
 若探测失败会回退到 `SELECT_BOARD` 对应宏。I2C 总线使用 `I2C_NUM_1`（与 `BoxAudioCodec` / 触摸同口）。
 
+#### 底座 UART 引脚
+
+底座通信 UART 会跟随同一套 PCB 探测结果，避免与功放脚冲突：
+
+| 版本 | UART TX | UART RX | 说明 |
+|------|---------|---------|------|
+| V1.0 | GPIO6   | GPIO5   | V1.0 的 PA 占用 GPIO4，不可再作 RX |
+| V1.2 | GPIO5   | GPIO4   | 与 `mag_slide_switch` 示例一致 |
+
+日志中会出现：`Base UART init: Port=1 Baud=115200 TX=... RX=...`。
+
 #### 其它引脚 / 显示
 
-UART、LCD RST 等仍跟编译期 `SELECT_BOARD` 走。若非音频问题且硬件与默认不一致，再改 `main/boards/esp_vocat/config.h` 中的 `SELECT_BOARD`。
+LCD RST、触摸滑条等仍跟编译期 `SELECT_BOARD` 走。若非音频/底座问题且硬件与默认不一致，再改 `main/boards/esp_vocat/config.h` 中的 `SELECT_BOARD`。
 
 ### 配置编译目标为 ESP32S3
 

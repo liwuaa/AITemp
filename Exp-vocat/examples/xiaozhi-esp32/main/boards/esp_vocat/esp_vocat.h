@@ -11,6 +11,7 @@
 #include "base_control.h"
 #include "audio_analysis.h"
 #include "touch_sensor.h"
+#include "config.h"
 #include <functional>
 
 class EspS3Cat : public WifiBoard {
@@ -31,6 +32,23 @@ public:
     BaseControl* GetBaseControl()
     {
         return base_control_;
+    }
+
+    int GetDetectedPcbVersion() const
+    {
+        return detected_pcb_version_;
+    }
+
+    // Base UART pins must follow PCB detection (same map as config.h per version).
+    // V1.0 PA uses GPIO4; using V1.2 UART RX=GPIO4 would steal the bus.
+    gpio_num_t GetBaseUartTxPin() const
+    {
+        return detected_pcb_version_ == PCB_VERSION_V1_0 ? GPIO_NUM_6 : GPIO_NUM_5;
+    }
+
+    gpio_num_t GetBaseUartRxPin() const
+    {
+        return detected_pcb_version_ == PCB_VERSION_V1_0 ? GPIO_NUM_5 : GPIO_NUM_4;
     }
 
 private:

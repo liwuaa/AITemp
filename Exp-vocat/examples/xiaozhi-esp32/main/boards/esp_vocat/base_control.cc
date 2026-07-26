@@ -47,10 +47,22 @@ BaseControl::~BaseControl()
 
 void BaseControl::Initialize()
 {
+    // Prefer runtime PCB detection over compile-time SELECT_BOARD UART macros.
+    // V1.0: TX=6 RX=5 (PA=4). V1.2: TX=5 RX=4 (PA=15). Mixing them breaks base UART.
+    gpio_num_t tx_pin = UART1_TX;
+    gpio_num_t rx_pin = UART1_RX;
+    if (board_ != nullptr) {
+        tx_pin = board_->GetBaseUartTxPin();
+        rx_pin = board_->GetBaseUartRxPin();
+    }
+    ESP_LOGI(TAG, "Base UART init: Port=1 Baud=115200 TX=%d RX=%d (PCB V1.%d)",
+             (int)tx_pin, (int)rx_pin,
+             board_ != nullptr && board_->GetDetectedPcbVersion() == PCB_VERSION_V1_0 ? 0 : 2);
+
     vocat_base_control_config_t base_config = {
         .uart_num = UART_NUM_1,
-        .tx_pin = UART1_TX,
-        .rx_pin = UART1_RX,
+        .tx_pin = tx_pin,
+        .rx_pin = rx_pin,
         .baud_rate = 115200,
         .rx_buffer_size = 1024,
         .cmd_cb = CmdCallback,
@@ -150,11 +162,15 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
                 break;
             case VOCAT_BASE_CMD_RECV_SWITCH_FISH_ATTACHED:
                 ESP_LOGI(TAG, "Fish attached");
-                emote_display->InsertAnimDialog("eat", 3500);
+                if (emote_display != nullptr) {
+                    emote_display->InsertAnimDialog("eat", 3500);
+                }
                 break;
             case VOCAT_BASE_CMD_RECV_SWITCH_PAIR_DETECT:
                 ESP_LOGI(TAG, "Pair detect");
-                emote_display->SetEmotion("happy");
+                if (emote_display != nullptr) {
+                    emote_display->SetEmotion("happy");
+                }
                 vocat_base_control_set_action(VOCAT_BASE_CMD_SET_ACTION_LOOK_AROUND);
                 break;
             default:
@@ -193,7 +209,9 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
 
             if (was_offline) {
                 ESP_LOGI(TAG, "Echo base connected (reinserted)");
-                emote_display->InsertAnimDialog("insert", 3000);
+                if (emote_display != nullptr) {
+                    emote_display->InsertAnimDialog("insert", 3000);
+                }
             }
             break;
         }
