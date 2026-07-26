@@ -21,40 +21,31 @@ python scripts/release.py esp_vocat
 ### 版本选择
 
 esp_vocat 有两个硬件版本：
-- **V1_0** (开源版本)
-- **V1_2**（编译默认，见 `config.h` 中 `SELECT_BOARD`）
+- **V1_0**（**当前本机强制使用**，见 `config.h` 中 `SELECT_BOARD`）
+- **V1_2**
 
-#### 音频引脚（喇叭 / 麦克风）
+音频、底座 UART、头部触摸、LCD RST **全部**跟 `SELECT_BOARD` 走，禁止运行时混用。本机实测强制 V1.2 会导致喇叭/麦/底座/屏异常。
 
-上电时会通过 I2C 探测 ES8311（地址 `0x18`）自动识别硬件版本并选择音频脚，无需为“有画面但无声”单独改宏：
+#### V1.0 引脚一览（当前默认）
 
-| 版本 | I2S DIN | PA | Codec 上电 |
-|------|---------|----|------------|
-| V1.0 | GPIO15  | GPIO4 | 探测即通 |
-| V1.2 | GPIO3   | GPIO15 | 需拉高 GPIO48 |
+| 功能 | 引脚 |
+|------|------|
+| I2S DIN | GPIO15 |
+| PA | GPIO4 |
+| 底座 UART TX/RX | GPIO6 / GPIO5 |
+| 摸头触摸 | GPIO7（无 pad2，GPIO6 给 UART） |
+| LCD RST | GPIO3（低有效） |
+
+若确认为 V1.2 板，把 `SELECT_BOARD` 改成 `PCB_VERSION_V1_2` 后全量重编。
 
 串口日志示例：
 
 ```text
-Detect PCB V1.2 audio pins: DIN=3 PA=15 (codec power GPIO48 on)
+SELECT_BOARD V1.0 pins: DIN=15 PA=4 UART TX=6 RX=5 LCD_RST=3 touch_pad2=disabled
+Base UART init: Port=1 Baud=115200 TX=6 RX=5 (SELECT_BOARD V1.0)
 ```
 
-若探测失败会回退到 `SELECT_BOARD` 对应宏。I2C 总线使用 `I2C_NUM_1`（与 `BoxAudioCodec` / 触摸同口）。
-
-#### 底座 UART 引脚
-
-底座通信 UART 会跟随同一套 PCB 探测结果，避免与功放脚冲突：
-
-| 版本 | UART TX | UART RX | 说明 |
-|------|---------|---------|------|
-| V1.0 | GPIO6   | GPIO5   | V1.0 的 PA 占用 GPIO4，不可再作 RX |
-| V1.2 | GPIO5   | GPIO4   | 与 `mag_slide_switch` 示例一致 |
-
-日志中会出现：`Base UART init: Port=1 Baud=115200 TX=... RX=...`。
-
-#### 其它引脚 / 显示
-
-LCD RST、触摸滑条等仍跟编译期 `SELECT_BOARD` 走。若非音频/底座问题且硬件与默认不一致，再改 `main/boards/esp_vocat/config.h` 中的 `SELECT_BOARD`。
+I2C 总线使用 `I2C_NUM_1`（与 `BoxAudioCodec` / 触摸同口）。
 
 ### 配置编译目标为 ESP32S3
 
@@ -165,8 +156,8 @@ idf.py -p COMx flash
 3. **`Access is denied` 删除 `.obj.d`**  
    残留 `ninja` 占用文件：结束相关 `ninja`/`python` 进程后再编。
 
-4. **喇叭无声 / 麦克风无效**  
-   先看串口是否打印 `Detect PCB V1.x audio pins`；V1.2 必须成功打开 GPIO48。若版本探测与实物不符，对照上表查 DIN/PA。
+4. **喇叭无声 / 麦克风无效 / 底座无通信 / 花屏**  
+   确认日志 `SELECT_BOARD V1.x pins` 与实物一致；本机请用 V1.0。错误版本会把 PA/UART/LCD RST 接到错误 GPIO。
 
 ## 新增应用（Customer UI）
 

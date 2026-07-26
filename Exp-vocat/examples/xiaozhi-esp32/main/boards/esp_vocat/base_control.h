@@ -29,10 +29,14 @@ private:
     EspS3Cat* board_;
     bool vocat_base_online_;
     int64_t last_heartbeat_time_;
+    int64_t offline_since_ms_;
     esp_timer_handle_t heartbeat_check_timer_;
     SemaphoreHandle_t calibrate_semaphore_;
-    
-    static constexpr int64_t HEARTBEAT_TIMEOUT_MS = 1000;  // 1 second timeout
+
+    // Base motors/noise can delay heartbeats; keep generous to avoid flap.
+    static constexpr int64_t HEARTBEAT_TIMEOUT_MS = 3000;
+    // Only play "insert" after a real unplug, not brief UART glitches.
+    static constexpr int64_t REINSERT_ANIM_MIN_OFFLINE_MS = 5000;
 
     static void HeartbeatCheckTimerCallback(void* arg);
     static void CmdCallback(uint8_t cmd, uint8_t *data, int data_len, void *user_ctx);

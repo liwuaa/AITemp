@@ -20,6 +20,8 @@
 
 #include <wifi_station.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
+#include <string.h>
 #include <driver/i2c_master.h>
 #include <driver/i2c.h>
 #include <esp_lcd_panel_io.h>
@@ -204,6 +206,10 @@ void EspS3Cat::Initializest77916Display()
     esp_lcd_panel_io_handle_t panel_io = nullptr;
     esp_lcd_panel_handle_t panel = nullptr;
 
+    // Keep backlight off until panel + first UI frame are ready (avoids boot garbage).
+    backlight_ = new PwmBacklight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+    backlight_->SetBrightness(0);
+
     esp_lcd_panel_io_spi_config_t io_config = ST77916_PANEL_IO_QSPI_CONFIG(QSPI_PIN_NUM_LCD_CS, NULL, NULL);
     io_config.trans_queue_depth = 2;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)QSPI_LCD_HOST, &io_config, &panel_io));
@@ -231,6 +237,21 @@ void EspS3Cat::Initializest77916Display()
     esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
     esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
 
+    // Clear framebuffer to black before enabling backlight.
+    {
+        constexpr int kBand = 20;
+        uint16_t *black_band = (uint16_t *)heap_caps_malloc(
+            DISPLAY_WIDTH * kBand * sizeof(uint16_t), MALLOC_CAP_DMA);
+        if (black_band != nullptr) {
+            memset(black_band, 0, DISPLAY_WIDTH * kBand * sizeof(uint16_t));
+            for (int y = 0; y < DISPLAY_HEIGHT; y += kBand) {
+                int h = (y + kBand <= DISPLAY_HEIGHT) ? kBand : (DISPLAY_HEIGHT - y);
+                esp_lcd_panel_draw_bitmap(panel, 0, y, DISPLAY_WIDTH, y + h, black_band);
+            }
+            heap_caps_free(black_band);
+        }
+    }
+
 #if CONFIG_USE_EMOTE_MESSAGE_STYLE
     display_ = new emote::EmoteDisplay(panel, panel_io, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     start_lvgl(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, display_);
@@ -238,7 +259,7 @@ void EspS3Cat::Initializest77916Display()
     display_ = new SpiLcdDisplay(panel_io, panel,
                                  DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
 #endif
-    backlight_ = new PwmBacklight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+    vTaskDelay(pdMS_TO_TICKS(80));
     backlight_->RestoreBrightness();
 }
 
@@ -262,67 +283,40 @@ void EspS3Cat::InitializeButtons()
 
 void EspS3Cat::InitializePower()
 {
-    // Codec power / audio pin map is decided in DetectPcbAudioPins().
+    // Codec power / audio pin map is decided in ApplyBoardPins().
 }
 
-void EspS3Cat::DetectPcbAudioPins()
+void EspS3Cat::ApplyBoardPins()
 {
-    // Official EchoEar BSP detects PCB by probing ES8311 (0x18):
-    // - responds without GPIO48 power → V1.0 (DIN=15, PA=4)
-    // - needs GPIO48 high first → V1.2 (DIN=3, PA=15)
-    constexpr uint16_t kEs8311Addr = 0x18;
+    // All pins follow SELECT_BOARD (this unit: V1.0). Do not mix with V1.2.
+    audio_din_pin_ = AUDIO_I2S_GPIO_DIN;
+    audio_pa_pin_ = AUDIO_CODEC_PA_PIN;
 
-    esp_err_t ret = i2c_master_probe(i2c_bus_, kEs8311Addr, 100);
-    if (ret == ESP_OK) {
-        detected_pcb_version_ = PCB_VERSION_V1_0;
-        audio_din_pin_ = GPIO_NUM_15;
-        audio_pa_pin_ = GPIO_NUM_4;
-        ESP_LOGI(TAG, "Detect PCB V1.0 audio pins: DIN=%d PA=%d", audio_din_pin_, audio_pa_pin_);
-    } else {
-        gpio_config_t gpio_conf = {
-            .pin_bit_mask = BIT64(GPIO_NUM_48),
-            .mode = GPIO_MODE_OUTPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        ESP_ERROR_CHECK(gpio_config(&gpio_conf));
-        ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_48, 1));
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        ret = i2c_master_probe(i2c_bus_, kEs8311Addr, 100);
-        if (ret == ESP_OK) {
-            detected_pcb_version_ = PCB_VERSION_V1_2;
-            audio_din_pin_ = GPIO_NUM_3;
-            audio_pa_pin_ = GPIO_NUM_15;
-            ESP_LOGI(TAG, "Detect PCB V1.2 audio pins: DIN=%d PA=%d (codec power GPIO48 on)",
-                     audio_din_pin_, audio_pa_pin_);
-        } else {
-            ESP_LOGW(TAG, "ES8311 probe failed, fallback to SELECT_BOARD=%d pins DIN=%d PA=%d",
-                     SELECT_BOARD, (int)AUDIO_I2S_GPIO_DIN, (int)AUDIO_CODEC_PA_PIN);
-            detected_pcb_version_ = SELECT_BOARD;
-            audio_din_pin_ = AUDIO_I2S_GPIO_DIN;
-            audio_pa_pin_ = AUDIO_CODEC_PA_PIN;
 #if SELECT_BOARD == PCB_VERSION_V1_2
-            gpio_config_t power_gpio_config = {
-                .pin_bit_mask = BIT64(GPIO_NUM_48),
-                .mode = GPIO_MODE_OUTPUT,
-                .pull_up_en = GPIO_PULLUP_DISABLE,
-                .pull_down_en = GPIO_PULLDOWN_DISABLE,
-                .intr_type = GPIO_INTR_DISABLE,
-            };
-            ESP_ERROR_CHECK(gpio_config(&power_gpio_config));
-            ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_48, 1));
-            vTaskDelay(pdMS_TO_TICKS(100));
+    gpio_config_t power_gpio_config = {
+        .pin_bit_mask = BIT64(CORDEC_POWER_CTRL),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&power_gpio_config));
+    ESP_ERROR_CHECK(gpio_set_level(CORDEC_POWER_CTRL, 1));
+    vTaskDelay(pdMS_TO_TICKS(100));
 #endif
-        }
-    }
 
-    if (detected_pcb_version_ != SELECT_BOARD) {
-        ESP_LOGW(TAG, "Detected PCB V1.%d but SELECT_BOARD is V1.%d — audio/UART pins follow detection",
-                 detected_pcb_version_ == PCB_VERSION_V1_0 ? 0 : 2,
-                 SELECT_BOARD == PCB_VERSION_V1_0 ? 0 : 2);
-    }
+    ESP_LOGI(TAG,
+             "SELECT_BOARD V1.%d pins: DIN=%d PA=%d UART TX=%d RX=%d LCD_RST=%d touch_pad2=%s",
+             SELECT_BOARD == PCB_VERSION_V1_0 ? 0 : 2,
+             (int)audio_din_pin_, (int)audio_pa_pin_,
+             (int)UART1_TX, (int)UART1_RX,
+             (int)QSPI_PIN_NUM_LCD_RST,
+#if TOUCH_SLIDER_ENABLED
+             "GPIO6"
+#else
+             "disabled"
+#endif
+    );
 }
 
 void EspS3Cat::InitializeCharge()
@@ -380,7 +374,7 @@ EspS3Cat::EspS3Cat() : boot_button_(BOOT_BUTTON_GPIO)
 {
     ESP_LOGI(TAG, "EchoEar SELECT_BOARD compile default: %d", SELECT_BOARD);
     InitializeI2c();
-    DetectPcbAudioPins();
+    ApplyBoardPins();
     InitializePower();
     InitializeCharge();
     InitializeSpi();

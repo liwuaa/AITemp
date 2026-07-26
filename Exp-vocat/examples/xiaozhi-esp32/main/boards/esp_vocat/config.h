@@ -7,8 +7,10 @@
 
 #define PCB_VERSION_V1_0                1
 #define PCB_VERSION_V1_2                2
-// #define SELECT_BOARD                    PCB_VERSION_V1_0
-#define SELECT_BOARD                    PCB_VERSION_V1_2
+// This unit is V1.0: audio/UART/LCD RST must stay on one map.
+// Forcing V1.2 previously broke speaker/mic/base UART/panel (wrong RST).
+#define SELECT_BOARD                    PCB_VERSION_V1_0
+// #define SELECT_BOARD                    PCB_VERSION_V1_2
 
 #define AUDIO_INPUT_SAMPLE_RATE         16000
 #define AUDIO_OUTPUT_SAMPLE_RATE        16000

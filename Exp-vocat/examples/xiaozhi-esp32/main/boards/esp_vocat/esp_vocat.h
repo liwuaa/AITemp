@@ -34,23 +34,6 @@ public:
         return base_control_;
     }
 
-    int GetDetectedPcbVersion() const
-    {
-        return detected_pcb_version_;
-    }
-
-    // Base UART pins must follow PCB detection (same map as config.h per version).
-    // V1.0 PA uses GPIO4; using V1.2 UART RX=GPIO4 would steal the bus.
-    gpio_num_t GetBaseUartTxPin() const
-    {
-        return detected_pcb_version_ == PCB_VERSION_V1_0 ? GPIO_NUM_6 : GPIO_NUM_5;
-    }
-
-    gpio_num_t GetBaseUartRxPin() const
-    {
-        return detected_pcb_version_ == PCB_VERSION_V1_0 ? GPIO_NUM_5 : GPIO_NUM_4;
-    }
-
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Cst816sTouch* cst816s_touch_ = nullptr;
@@ -63,10 +46,9 @@ private:
     AudioAnalysis* audio_analysis_;
     TouchSensor* touch_sensor_;
 
-    // Runtime-detected audio pins (EchoEar V1.0 vs V1.2 differ).
+    // Pins always follow SELECT_BOARD (this unit: V1.0) — no runtime version mixing.
     gpio_num_t audio_din_pin_ = GPIO_NUM_NC;
     gpio_num_t audio_pa_pin_ = GPIO_NUM_NC;
-    int detected_pcb_version_ = 0;
 
     void InitializeI2c();
     void InitializeSpi();
@@ -76,7 +58,7 @@ private:
     void InitializeCst816sTouchPad();
     void InitializeTouchSensor();
     void InitializePower();
-    void DetectPcbAudioPins();
+    void ApplyBoardPins();
     // void create_control_ui();
 };
 

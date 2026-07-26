@@ -26,6 +26,7 @@ BaseControl::BaseControl(EspS3Cat* board) : board_(board)
 {
     vocat_base_online_ = false;
     last_heartbeat_time_ = 0;
+    offline_since_ms_ = 0;
     heartbeat_check_timer_ = nullptr;
     calibrate_semaphore_ = xSemaphoreCreateBinary();
 
@@ -47,22 +48,14 @@ BaseControl::~BaseControl()
 
 void BaseControl::Initialize()
 {
-    // Prefer runtime PCB detection over compile-time SELECT_BOARD UART macros.
-    // V1.0: TX=6 RX=5 (PA=4). V1.2: TX=5 RX=4 (PA=15). Mixing them breaks base UART.
-    gpio_num_t tx_pin = UART1_TX;
-    gpio_num_t rx_pin = UART1_RX;
-    if (board_ != nullptr) {
-        tx_pin = board_->GetBaseUartTxPin();
-        rx_pin = board_->GetBaseUartRxPin();
-    }
-    ESP_LOGI(TAG, "Base UART init: Port=1 Baud=115200 TX=%d RX=%d (PCB V1.%d)",
-             (int)tx_pin, (int)rx_pin,
-             board_ != nullptr && board_->GetDetectedPcbVersion() == PCB_VERSION_V1_0 ? 0 : 2);
+    ESP_LOGI(TAG, "Base UART init: Port=1 Baud=115200 TX=%d RX=%d (SELECT_BOARD V1.%d)",
+             (int)UART1_TX, (int)UART1_RX,
+             SELECT_BOARD == PCB_VERSION_V1_0 ? 0 : 2);
 
     vocat_base_control_config_t base_config = {
         .uart_num = UART_NUM_1,
-        .tx_pin = tx_pin,
-        .rx_pin = rx_pin,
+        .tx_pin = UART1_TX,
+        .rx_pin = UART1_RX,
         .baud_rate = 115200,
         .rx_buffer_size = 1024,
         .cmd_cb = CmdCallback,
@@ -98,6 +91,7 @@ void BaseControl::Initialize()
     // Initialize to offline state
     vocat_base_online_ = false;
     last_heartbeat_time_ = 0;
+    offline_since_ms_ = 0;
 }
 
 void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
@@ -109,13 +103,13 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
 
     emote::EmoteDisplay* emote_display = dynamic_cast<emote::EmoteDisplay*>(display);
 
-    // if (cmd != VOCAT_BASE_CMD_RECV_HEARTBEAT) {
+    if (cmd != VOCAT_BASE_CMD_RECV_HEARTBEAT) {
         printf("Handle: cmd=%02X, ", cmd);
         for (int i = 0; i < data_len; i++) {
             printf("%02X ", data[i]);
         }
         printf("\n");
-    // }
+    }
 
     switch (cmd) {
     case VOCAT_BASE_CMD_RECV_SLIDE_SWITCH: {
@@ -198,19 +192,30 @@ void BaseControl::HandleCommand(uint8_t cmd, uint8_t *data, int data_len)
         break;
     }
     case VOCAT_BASE_CMD_RECV_HEARTBEAT: {
-        uint16_t event = (data[0] << 8) | data[1];
+        uint16_t event = (data_len >= 2) ? ((data[0] << 8) | data[1]) : 0;
         switch (event) {
         case VOCAT_BASE_CMD_RECV_HEARTBEAT_ALIVE: {
             int64_t current_time = esp_timer_get_time() / 1000;  // Convert to milliseconds
             bool was_offline = !vocat_base_online_;
+            int64_t offline_ms = 0;
+            if (was_offline && offline_since_ms_ > 0) {
+                offline_ms = current_time - offline_since_ms_;
+            }
 
             last_heartbeat_time_ = current_time;
             vocat_base_online_ = true;
+            offline_since_ms_ = 0;
 
             if (was_offline) {
-                ESP_LOGI(TAG, "Echo base connected (reinserted)");
-                if (emote_display != nullptr) {
-                    emote_display->InsertAnimDialog("insert", 3000);
+                // Brief UART glitches while the base is moving must not spam insert anim.
+                if (offline_ms >= REINSERT_ANIM_MIN_OFFLINE_MS) {
+                    ESP_LOGI(TAG, "Echo base reinserted after %ld ms offline", (long)offline_ms);
+                    if (emote_display != nullptr) {
+                        emote_display->InsertAnimDialog("insert", 3000);
+                    }
+                } else {
+                    ESP_LOGI(TAG, "Echo base online (offline was %ld ms, skip insert anim)",
+                             (long)offline_ms);
                 }
             }
             break;
@@ -240,10 +245,10 @@ void BaseControl::HeartbeatCheckTimerCallback(void* arg)
     int64_t current_time = esp_timer_get_time() / 1000;  // Convert to milliseconds
     int64_t time_since_last_heartbeat = current_time - self->last_heartbeat_time_;
 
-    // Check if heartbeat timeout (2 seconds = 4 missed heartbeats at 500ms interval)
     if (self->vocat_base_online_ && time_since_last_heartbeat > BaseControl::HEARTBEAT_TIMEOUT_MS) {
         self->vocat_base_online_ = false;
-        ESP_LOGW(TAG, "Echo base disconnected (timeout: %lld ms)", time_since_last_heartbeat);
+        self->offline_since_ms_ = current_time;
+        ESP_LOGW(TAG, "Echo base disconnected (timeout: %ld ms)", (long)time_since_last_heartbeat);
     }
 }
 

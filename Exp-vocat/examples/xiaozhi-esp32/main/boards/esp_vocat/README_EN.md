@@ -21,21 +21,22 @@ python scripts/release.py esp_vocat
 ### Version Selection
 
 esp_vocat has two hardware versions:
-- **V1_0** (Open source version)
-- **V1_2** (compile-time default via `SELECT_BOARD` in `config.h`)
+- **V1_0** (**forced on this unit** via `SELECT_BOARD` in `config.h`)
+- **V1_2**
 
-#### Audio pins (speaker / mic)
+Audio, base UART, head-touch, and LCD RST **all** follow `SELECT_BOARD`. Runtime mixing is disabled. Forcing V1.2 on this board broke speaker/mic/base/panel.
 
-At boot, the board probes ES8311 (`0x18`) over I2C and selects audio pins automatically:
+#### V1.0 pin summary (current default)
 
-| Version | I2S DIN | PA | Codec power |
-|---------|---------|----|-------------|
-| V1.0 | GPIO15 | GPIO4 | Already powered |
-| V1.2 | GPIO3 | GPIO15 | Drive GPIO48 high |
+| Function | Pins |
+|----------|------|
+| I2S DIN | GPIO15 |
+| PA | GPIO4 |
+| Base UART TX/RX | GPIO6 / GPIO5 |
+| Head touch | GPIO7 only (GPIO6 used by UART) |
+| LCD RST | GPIO3 (active low) |
 
-Look for logs like `Detect PCB V1.2 audio pins: DIN=3 PA=15`. On probe failure, pins fall back to `SELECT_BOARD` macros. I2C uses `I2C_NUM_1` (same as `BoxAudioCodec` / touch).
-
-UART / LCD RST and other non-audio pins still follow compile-time `SELECT_BOARD`. Change `config.h` only if those differ from your PCB.
+For a real V1.2 board, set `SELECT_BOARD` to `PCB_VERSION_V1_2` and rebuild.
 
 ### Configure Build Target to ESP32S3
 
