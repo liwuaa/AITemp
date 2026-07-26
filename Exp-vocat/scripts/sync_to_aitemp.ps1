@@ -9,24 +9,26 @@ $RepoUrl = "https://github.com/liwuaa/AITemp.git"
 $RemotePrefix = "Exp-vocat"
 $Src = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Work = Join-Path $env:TEMP "AITemp-sync"
-$GitNet = @(
-    "-c", "http.proxy=http://127.0.0.1:10809",
-    "-c", "https.proxy=http://127.0.0.1:10809",
-    "-c", "http.version=HTTP/1.1"
-)
+function Invoke-GitNet {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GitArgs)
+    git @GitArgs
+    if ($LASTEXITCODE -eq 0) { return }
+    git -c http.proxy=http://127.0.0.1:10809 -c https.proxy=http://127.0.0.1:10809 -c http.version=HTTP/1.1 @GitArgs
+    if ($LASTEXITCODE -ne 0) { throw "git $($GitArgs -join ' ') failed ($LASTEXITCODE)" }
+}
 
 Write-Host "Source : $Src"
 Write-Host "Target : $RepoUrl/$RemotePrefix (local wins)"
 
 if (Test-Path (Join-Path $Work ".git")) {
     Push-Location $Work
-    git @GitNet fetch origin
+    Invoke-GitNet fetch origin
     git checkout main
     git reset --hard origin/main
     Pop-Location
 } else {
     if (Test-Path $Work) { Remove-Item $Work -Recurse -Force }
-    git @GitNet clone $RepoUrl $Work
+    Invoke-GitNet clone $RepoUrl $Work
 }
 
 $Dst = Join-Path $Work $RemotePrefix
@@ -57,11 +59,7 @@ try {
     git commit --no-verify -m "Sync Exp-vocat from local ($stamp)"
     if ($LASTEXITCODE -ne 0) { throw "git commit failed ($LASTEXITCODE)" }
 
-    git @GitNet push origin main
-    if ($LASTEXITCODE -ne 0) {
-        git push origin main
-        if ($LASTEXITCODE -ne 0) { throw "git push failed ($LASTEXITCODE)" }
-    }
+    Invoke-GitNet push origin main
     Write-Host "Pushed to $RepoUrl ($RemotePrefix)."
 } finally {
     Pop-Location
