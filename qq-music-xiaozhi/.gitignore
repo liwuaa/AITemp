@@ -38,3 +38,8 @@ dist/
 .npm/
 .pytest_cache/
 .mypy_cache/
+
+# Local ffmpeg portable build
+tools/ffmpeg*/
+tools/ffmpeg.zip
+tools/ffmpeg_path.txt

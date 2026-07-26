@@ -90,10 +90,20 @@ if "%MUSIC_PROXY_HOST%"=="" set "MUSIC_PROXY_HOST=127.0.0.1"
 if "%MUSIC_PROXY_PORT%"=="" set "MUSIC_PROXY_PORT=3210"
 if "%PORT%"=="" set "PORT=3200"
 
+REM Auto-pick LAN IP when .env still has 127.0.0.1 (device cannot use loopback)
+if /I "%MUSIC_PROXY_HOST%"=="127.0.0.1" (
+  for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$ips=Get-NetIPAddress -AddressFamily IPv4|?{$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -notlike '192.168.137.*'}|Sort-Object IPAddress; if($ips){$ips[0].IPAddress}"`) do set "MUSIC_PROXY_HOST=%%I"
+)
+if /I "%MUSIC_PROXY_HOST%"=="localhost" (
+  for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$ips=Get-NetIPAddress -AddressFamily IPv4|?{$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -notlike '192.168.137.*'}|Sort-Object IPAddress; if($ips){$ips[0].IPAddress}"`) do set "MUSIC_PROXY_HOST=%%I"
+)
+
 echo.
 echo [INFO] QQ Music API   = http://localhost:%PORT%
-echo [INFO] Music Proxy    = http://%MUSIC_PROXY_HOST%:%MUSIC_PROXY_PORT%/proxy/play
+echo [INFO] Music PCM      = http://%MUSIC_PROXY_HOST%:%MUSIC_PROXY_PORT%/proxy/pcm
 echo [INFO] MCP Endpoint   = %MCP_ENDPOINT%
+echo [WARN] Device must be on the SAME WiFi/LAN as %MUSIC_PROXY_HOST%
+echo [INFO] If no sound, set MUSIC_PROXY_HOST in .env to your PC WiFi IP.
 echo [INFO] Keep MCP window open, or Xiaozhi will disconnect.
 echo.
 

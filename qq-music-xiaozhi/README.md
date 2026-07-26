@@ -17,14 +17,16 @@
 
 | 工具 | 说明 |
 |------|------|
-| `qq_music_search_songs` | 关键词搜歌（带缓存） |
-| `qq_music_get_play_url` | 取 128kbps MP3 的 `cdn_url` + `proxy_url` |
-| `qq_music_recent` | 本进程最近解析过的播放项 |
-| `qq_music_auth_status` | 登录态摘要（不含完整 Cookie） |
-| `qq_music_cache_stats` | 缓存命中与并发统计 |
-| `qq_music_cache_clear` | 清空内存缓存 |
+| `qq_music_play` | **听歌优先用**：返回 `pcm_url`，设备必须用它调用 `self.music.play_url` |
+| `qq_music_search_songs` | 仅「查歌」时用（不会出声） |
+| `qq_music_get_play_url` | 取链（设备请用其中的 `pcm_url`） |
 
-推荐语音侧顺序：`search_songs` → `get_play_url` →（二期）设备 `self.music.play_url`。
+**正确出声链路**：
+
+1. PC：`qq_music_play` → 得到 `pcm_url`（`http://电脑局域网IP:3210/proxy/pcm?...`）
+2. 设备：`self.music.play_url` 播放该 PCM（MP3 在电脑用 ffmpeg 解码，设备不再解 MP3）
+
+`cdn_url` / HTTPS **不要**给设备。`.env` 里 `MUSIC_PROXY_HOST` 必须是与设备同一 WiFi 的电脑 IP。
 
 ## 目录结构
 

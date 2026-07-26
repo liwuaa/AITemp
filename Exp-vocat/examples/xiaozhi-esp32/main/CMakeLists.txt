@@ -149,10 +149,12 @@ endif()
 
 if(CONFIG_BOARD_TYPE_ESP_VOCAT)
     list(APPEND SOURCES
-        "boards/esp_vocat/ui_bridge.cc")
+        "boards/esp_vocat/ui_bridge.cc"
+        "audio/music/music_player.cc")
     list(APPEND INCLUDE_DIRS "ui_bridge")
     list(APPEND INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/boards/esp_vocat")
     list(APPEND INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/boards/esp_vocat/customer_ui")
+    list(APPEND INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/audio/music")
 endif()
 
 file(GLOB_RECURSE BOARD_SOURCES

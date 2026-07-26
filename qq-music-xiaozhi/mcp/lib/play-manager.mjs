@@ -105,6 +105,7 @@ export function createPlayManager(deps) {
           throw err;
         }
         const proxyUrl = `${config.proxyBaseUrl.replace(/\/$/, "")}/proxy/play?songmid=${encodeURIComponent(mid)}&quality=${encodeURIComponent(q)}`;
+        const pcmUrl = `${config.proxyBaseUrl.replace(/\/$/, "")}/proxy/pcm?songmid=${encodeURIComponent(mid)}&quality=${encodeURIComponent(q)}`;
         return {
           songmid: mid,
           songname: songname || "",
@@ -112,6 +113,7 @@ export function createPlayManager(deps) {
           quality: q,
           cdn_url: cdnUrl,
           proxy_url: proxyUrl,
+          pcm_url: pcmUrl,
           expires_hint_sec: Math.floor(config.playTtlMs / 1000),
         };
       });
@@ -123,6 +125,7 @@ export function createPlayManager(deps) {
         singer: data.singer,
         cdn_url: data.cdn_url,
         proxy_url: data.proxy_url,
+        pcm_url: data.pcm_url,
         at: Date.now(),
       });
       return { ok: true, cached: false, tool: "qq_music_get_play_url", data };
@@ -161,9 +164,79 @@ export function createPlayManager(deps) {
     };
   }
 
+  /**
+   * One-shot: resolve a playable URL and tell the LLM to call the device tool next.
+   * Xiaozhi often stops after search; this collapses search+get_url and forces the handoff.
+   */
+  async function playSong({ keyword = "", songmid = "", index = 0, quality = "128" } = {}) {
+    let mid = String(songmid || "").trim();
+    let songname = "";
+    let singer = "";
+    let picked = null;
+
+    if (!mid) {
+      const keyWord = String(keyword || "").trim();
+      if (!keyWord) {
+        return {
+          ok: false,
+          error: "keyword_or_songmid_required",
+          message: "Provide keyword or songmid",
+        };
+      }
+      const search = await searchSongs(keyWord, config.searchLimit);
+      if (!search.ok || !search.data?.songs?.length) {
+        return {
+          ok: false,
+          error: "no_results",
+          message: search.message || "No songs found",
+          search,
+        };
+      }
+      const idx = Math.min(Math.max(Number(index) || 0, 0), search.data.songs.length - 1);
+      picked = search.data.songs[idx];
+      mid = picked.songmid;
+      songname = picked.songname;
+      singer = picked.singer;
+    }
+
+    const play = await getPlayUrl(mid, quality || "128", songname, singer);
+    if (!play.ok) {
+      return { ...play, picked };
+    }
+
+    const title = [play.data.songname || songname, play.data.singer || singer]
+      .filter(Boolean)
+      .join(" - ");
+    // Device only plays LAN PCM (/proxy/pcm). CDN/HTTPS and on-device MP3 are unstable.
+    const playUrl = play.data.pcm_url || play.data.proxy_url?.replace("/proxy/play", "/proxy/pcm");
+    return {
+      ok: true,
+      tool: "qq_music_play",
+      must_call_next: true,
+      instruction_zh:
+        "用户要听歌：立刻调用设备工具 self.music.play_url，" +
+        "url 必须用返回的 pcm_url（http://电脑局域网IP:3210/proxy/pcm?...），不要用 cdn_url/https。",
+      instruction_en:
+        "REQUIRED NEXT: call self.music.play_url with pcm_url only (never cdn_url/https).",
+      device_tool: "self.music.play_url",
+      device_arguments: {
+        url: playUrl,
+        title: title || play.data.songmid,
+      },
+      data: {
+        ...play.data,
+        songname: play.data.songname || songname,
+        singer: play.data.singer || singer,
+        preferred_url: playUrl,
+        picked,
+      },
+    };
+  }
+
   return {
     searchSongs,
     getPlayUrl,
+    playSong,
     listRecent,
   };
 }

@@ -438,6 +438,37 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
     return true;
 }
 
+bool AudioService::PushPcmForPlayback(std::vector<int16_t>&& pcm, bool wait) {
+    if (pcm.empty() || service_stopped_) {
+        return false;
+    }
+    std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+    if (audio_playback_queue_.size() >= MAX_PLAYBACK_TASKS_IN_QUEUE) {
+        if (wait) {
+            audio_queue_cv_.wait(lock, [this]() {
+                return service_stopped_ || audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE;
+            });
+            if (service_stopped_) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    auto task = std::make_unique<AudioTask>();
+    task->type = kAudioTaskTypeDecodeToPlaybackQueue;
+    task->timestamp = 0;
+    task->pcm = std::move(pcm);
+    audio_playback_queue_.push_back(std::move(task));
+    audio_queue_cv_.notify_all();
+    return true;
+}
+
+bool AudioService::HasPlaybackData() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    return !audio_decode_queue_.empty() || !audio_playback_queue_.empty();
+}
+
 std::unique_ptr<AudioStreamPacket> AudioService::PopPacketFromSendQueue() {
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     if (audio_send_queue_.empty()) {

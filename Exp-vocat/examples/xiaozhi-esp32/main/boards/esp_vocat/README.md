@@ -234,3 +234,18 @@ idf.py -p COMx flash
     - "步骤2：取下磁吸按钮"
 
 - **语音校准**: 说 "校准底座"
+
+## 在线音乐（QQ Music MCP）
+
+需本机运行 `qq-music-xiaozhi`。**检索在电脑，播放在设备**，推荐：
+
+1. 云端调用 PC 工具 `qq_music_play`
+2. 再调用设备工具 `self.music.play_url`（把返回的 `proxy_url`/`cdn_url` 传入）
+
+| 工具 | 说明 |
+|------|------|
+| `self.music.play_url` | **真正出声**：播放 MP3 URL |
+| `self.music.pause` / `resume` / `stop` | 暂停 / 续播 / 停止 |
+| `self.music.get_status` | 状态：playing / paused / paused_for_ai / idle |
+
+**优先级**：唤醒、聆听、TTS 说话时音乐会自动暂停（`paused_for_ai`），回到 Idle 后自动续播；用户 `pause` 不会自动续播，需 `resume`。

@@ -10,6 +10,7 @@
 #include <cstring>
 #include "customer_ui/alarm_api.h"
 #include "ui_bridge.h"
+#include "music_player.h"
 
 #define TAG "DevTools"
 
@@ -188,4 +189,58 @@ void DevTools::Initialize(EspS3Cat* board)
         alarm_start_sleep(end_hour, end_min);
         return true;
     });
+
+    // Ensure music player registers AI-priority state hooks early.
+    MusicPlayer::GetInstance();
+
+    // Online music playback (QQ Music MCP provides URL; AI speech has priority)
+    mcp_server.AddTool("self.music.play_url",
+        is_zh ? "播放音乐。url 必须是电脑局域网 PCM 地址："
+                "http://电脑IP:3210/proxy/pcm?songmid=...（来自 qq_music_play 的 pcm_url）。"
+                "不要传 https/CDN。可选 title。"
+              : "Play music from LAN PCM proxy url (pcm_url from qq_music_play). "
+                "Must be http://PC_IP:3210/proxy/pcm?... — never https/CDN. Optional title.",
+        PropertyList({
+            Property("url", kPropertyTypeString),
+            Property("title", kPropertyTypeString, std::string("")),
+        }), [](const PropertyList& properties) -> ReturnValue {
+            const std::string& url = properties["url"].value<std::string>();
+            const std::string& title = properties["title"].value<std::string>();
+            if (url.empty()) {
+                return false;
+            }
+            ESP_LOGI(TAG, "self.music.play_url title=%s url=%s", title.c_str(), url.c_str());
+            return MusicPlayer::GetInstance().Play(url, title);
+        });
+
+    mcp_server.AddTool("self.music.pause",
+        is_zh ? "暂停当前音乐（用户暂停，不会在对话结束后自动续播，需调用 resume）。"
+              : "Pause current music (user pause; will not auto-resume after AI).",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            MusicPlayer::GetInstance().Pause();
+            return true;
+        });
+
+    mcp_server.AddTool("self.music.resume",
+        is_zh ? "继续播放已暂停的音乐。若当前正在 AI 对话，会等到空闲后再续播。"
+              : "Resume paused music. If AI is speaking/listening, resume after idle.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            MusicPlayer::GetInstance().Resume();
+            return true;
+        });
+
+    mcp_server.AddTool("self.music.stop",
+        is_zh ? "停止音乐并清除续播状态。"
+              : "Stop music and clear resume state.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            MusicPlayer::GetInstance().Stop();
+            return true;
+        });
+
+    mcp_server.AddTool("self.music.get_status",
+        is_zh ? "查询音乐播放状态：playing/paused/paused_for_ai/idle。"
+              : "Get music status: playing/paused/paused_for_ai/idle.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            return MusicPlayer::GetInstance().GetStatusJson();
+        });
 }

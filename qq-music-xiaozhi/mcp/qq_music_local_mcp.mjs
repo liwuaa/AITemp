@@ -1,6 +1,6 @@
 /**
  * Local QQ Music MCP for Xiaozhi:
- * search / play url / recent / cache / auth — with request cache & management.
+ * play / search / play url / recent / cache / auth — with request cache & management.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import { RequestCache } from "./lib/request-cache.mjs";
 import { RequestManager } from "./lib/request-manager.mjs";
 import { readUserAuth, cookieKeyNames } from "./lib/auth.mjs";
 import { createPlayManager } from "./lib/play-manager.mjs";
+import { resolveProxyHost } from "./lib/resolve-proxy-host.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -28,7 +29,7 @@ const CONCURRENCY = Number(process.env.MCP_UPSTREAM_CONCURRENCY || 4);
 const SEARCH_LIMIT = Number(process.env.MCP_SEARCH_LIMIT || 8);
 const RECENT_MAX = Number(process.env.MCP_RECENT_MAX || 20);
 const PROXY_PORT = Number(process.env.MUSIC_PROXY_PORT || 3210);
-const PROXY_HOST = process.env.MUSIC_PROXY_HOST || "127.0.0.1";
+const PROXY_HOST = resolveProxyHost(process.env.MUSIC_PROXY_HOST);
 const PROXY_BASE = `http://${PROXY_HOST}:${PROXY_PORT}`;
 
 const { search, getMusicPlay } = await import("@sansenjian/qq-music-api/sdk");
@@ -60,14 +61,55 @@ function textResult(payload) {
 
 const server = new McpServer({
   name: "qq-music-local",
-  version: "1.0.0",
+  version: "1.1.0",
 });
+
+server.registerTool(
+  "qq_music_play",
+  {
+    description:
+      "【用户要听歌时优先用这个】解析歌曲并返回设备可播的 pcm_url。" +
+      "立刻调用 self.music.play_url，url 只能用 pcm_url（http://电脑IP:3210/proxy/pcm?...）。" +
+      "禁止使用 cdn_url / https。",
+    inputSchema: {
+      keyword: z
+        .string()
+        .optional()
+        .describe("Song/artist keyword to play, e.g. 晴天 周杰伦"),
+      songmid: z
+        .string()
+        .optional()
+        .describe("Optional QQ Music songmid; skips search if provided"),
+      index: z
+        .number()
+        .int()
+        .min(0)
+        .max(14)
+        .optional()
+        .describe("Which search hit to play, default 0 (first)"),
+      quality: z
+        .string()
+        .optional()
+        .describe("Audio quality, default 128 (mp3)"),
+    },
+  },
+  async ({ keyword, songmid, index, quality }) =>
+    textResult(
+      await playManager.playSong({
+        keyword: keyword || "",
+        songmid: songmid || "",
+        index: index ?? 0,
+        quality: quality || "128",
+      })
+    )
+);
 
 server.registerTool(
   "qq_music_search_songs",
   {
     description:
-      "Search QQ Music songs by keyword. Returns a short list with songmid/songname/singer. Use songmid with qq_music_get_play_url before asking the device to play.",
+      "仅在用户只要「搜歌/查歌」时使用。若用户要播放，请改用 qq_music_play，" +
+      "再调用设备 self.music.play_url。本工具不会让设备出声。",
     inputSchema: {
       keyword: z.string().describe("Search keyword, e.g. song or artist name"),
       limit: z
@@ -86,7 +128,8 @@ server.registerTool(
   "qq_music_get_play_url",
   {
     description:
-      "Get a playable 128kbps MP3 URL for a QQ Music songmid. Returns cdn_url and proxy_url. Prefer proxy_url for ESP32 if CDN is blocked. Requires local QR login cookie.",
+      "根据 songmid 取 MP3 的 cdn_url/proxy_url。取到后必须再调用设备 self.music.play_url 才会播放。" +
+      "用户直接说听歌时优先用 qq_music_play。",
     inputSchema: {
       songmid: z.string().describe("QQ Music songmid from search results"),
       quality: z
@@ -129,6 +172,7 @@ server.registerTool(
         hasCookie: auth.hasCookie,
         cookieKeys: cookieKeyNames(auth.cookie),
         configDir: CONFIG_DIR,
+        proxy_base: PROXY_BASE,
       },
     });
   }
@@ -170,6 +214,10 @@ server.registerTool(
       data: { cleared: true, cache: cache.stats() },
     });
   }
+);
+
+process.stderr.write(
+  `[qq-music-local] proxy_base=${PROXY_BASE} (MUSIC_PROXY_HOST raw=${process.env.MUSIC_PROXY_HOST || ""})\n`
 );
 
 const transport = new StdioServerTransport();
