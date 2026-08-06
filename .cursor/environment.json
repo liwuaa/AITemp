@@ -1,0 +1,29 @@
+{
+  "name": "AITemp (qq-music-xiaozhi + Exp-vocat firmware)",
+  "user": "root",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "qq-music-api",
+      "command": "cd qq-music-xiaozhi && QQ_MUSIC_API_CONFIG_DIR=./config USE_GLOBAL_COOKIE=true PORT=3200 node ./node_modules/@sansenjian/qq-music-api/dist/app.js",
+      "description": "QQ Music HTTP API on http://localhost:3200 (e.g. /getRanks, /getTopLists, /getSearchByKey)."
+    },
+    {
+      "name": "music-proxy",
+      "command": "cd qq-music-xiaozhi && QQ_MUSIC_API_CONFIG_DIR=./config USE_GLOBAL_COOKIE=true MUSIC_PROXY_HOST=127.0.0.1 MUSIC_PROXY_PORT=3210 node ./mcp/proxy-play.mjs",
+      "description": "Music reverse proxy on http://localhost:3210 (MP3 -> PCM via ffmpeg; /health, /proxy/pcm, /proxy/play)."
+    },
+    {
+      "name": "xiaozhi-mcp-pipe",
+      "command": "cd qq-music-xiaozhi && if [ -n \"${MCP_ENDPOINT:-}\" ] && ! printf '%s' \"$MCP_ENDPOINT\" | grep -q '请替换'; then MUSIC_PROXY_HOST=127.0.0.1 MUSIC_PROXY_PORT=3210 ./.venv/bin/python mcp/mcp_pipe.py; else echo '[xiaozhi-mcp-pipe] MCP_ENDPOINT not set. Add it as a secret (wss://api.xiaozhi.me/mcp/?token=...) to bridge the local MCP to xiaozhi.me. Staying idle.'; sleep infinity; fi",
+      "description": "Bridges the local QQ Music MCP to the Xiaozhi cloud. Needs the MCP_ENDPOINT secret; idle without it."
+    }
+  ],
+  "ports": [
+    { "name": "qq-music-api", "port": 3200 },
+    { "name": "music-proxy", "port": 3210 }
+  ]
+}
