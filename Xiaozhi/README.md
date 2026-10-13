@@ -1,5 +1,7 @@
 # AITemp
 
+# 小智机器人固件及QQ音乐MCP
+
 ## 本地服务
 
 - [qq-music-xiaozhi](./qq-music-xiaozhi/)：QQ Music API + 小智 MCP 接入
